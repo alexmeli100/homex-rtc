@@ -12,8 +12,11 @@ import ARKit
 class ViewController: UIViewController, ARSCNViewDelegate {
 
     @IBOutlet var sceneView: ARSCNView!
+    var colorPickerButton: UIButton!
+    var colorPickerViewController: UIColorPickerViewController!
     var swiped = false
     var lastPosition: SCNVector3?
+    var currentColor = UIColor.systemGreen
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -30,6 +33,25 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Set the scene to the view
         sceneView.scene = scene
         UIApplication.shared.isIdleTimerDisabled = true
+        
+        colorPickerViewController = UIColorPickerViewController()
+        colorPickerViewController.delegate = self
+        
+        colorPickerButton = UIButton()
+        colorPickerButton.setImage(UIImage(systemName: "paintbrush.pointed", withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .regular, scale: .default)), for: .normal)
+        colorPickerButton.backgroundColor = currentColor
+        colorPickerButton.tintColor = .white
+        colorPickerButton.layer.cornerRadius = 35
+        colorPickerButton.translatesAutoresizingMaskIntoConstraints = false
+        colorPickerButton.addTarget(self, action: #selector(presentColorPicker), for: .touchUpInside)
+        self.view.addSubview(colorPickerButton)
+        
+        NSLayoutConstraint.activate([
+            colorPickerButton.heightAnchor.constraint(equalToConstant: 70),
+            colorPickerButton.widthAnchor.constraint(equalToConstant: 70),
+            colorPickerButton.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -15),
+            colorPickerButton.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: -35)
+        ])
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -40,6 +62,17 @@ class ViewController: UIViewController, ARSCNViewDelegate {
 
         // Run the view's session
         sceneView.session.run(configuration)
+    }
+    
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        
+        colorPickerButton.layer.shadowColor = UIColor.black.cgColor
+        colorPickerButton.layer.shadowOffset = CGSize(width: 3, height: 4)
+        colorPickerButton.layer.shadowRadius = 6
+        colorPickerButton.layer.shadowOpacity = 0.2
+        colorPickerButton.layer.shadowPath = UIBezierPath(roundedRect: colorPickerButton.bounds, cornerRadius: 35).cgPath
+        colorPickerButton.layer.masksToBounds = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -81,8 +114,7 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         let sphereNodeGeometry = SCNSphere(radius: 0.003)
 //
 //        //5. Generate A Random Colour For The Node's Geometry
-        let colour = UIColor.green
-        sphereNodeGeometry.firstMaterial?.diffuse.contents = colour
+        sphereNodeGeometry.firstMaterial?.diffuse.contents = currentColor
         sphereNode.geometry = sphereNodeGeometry
         sphereNode.position = SCNVector3(worldCoordinates.columns.3.x,  worldCoordinates.columns.3.y,  worldCoordinates.columns.3.z)
 
@@ -112,6 +144,10 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Reset tracking and/or remove existing anchors if consistent tracking is required
         
     }
+    
+    @objc private func presentColorPicker() {
+        self.present(colorPickerViewController, animated: true, completion: nil)
+    }
 }
 
 extension SCNGeometry {
@@ -120,5 +156,13 @@ extension SCNGeometry {
         let source = SCNGeometrySource(vertices: [vector1, vector2])
         let element = SCNGeometryElement(indices: indices, primitiveType: .line)
         return SCNGeometry(sources: [source], elements: [element])
+    }
+}
+
+extension ViewController: UIColorPickerViewControllerDelegate {
+    func colorPickerViewController(_ viewController: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool) {
+        self.currentColor = color
+        self.colorPickerButton.backgroundColor = color
+        self.colorPickerViewController.dismiss(animated: true, completion: nil)
     }
 }
