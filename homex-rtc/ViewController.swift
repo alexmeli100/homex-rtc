@@ -92,7 +92,7 @@ class ViewController: UIViewController {
         colorPickerButton.layer.cornerRadius = 35
         colorPickerButton.translatesAutoresizingMaskIntoConstraints = false
         colorPickerButton.addTarget(self, action: #selector(presentColorPicker), for: .touchUpInside)
-        self.view.addSubview(colorPickerButton)
+        view.addSubview(colorPickerButton)
         
         NSLayoutConstraint.activate([
             colorPickerButton.heightAnchor.constraint(equalToConstant: 70),
@@ -184,7 +184,7 @@ class ViewController: UIViewController {
 
     
     @objc private func presentColorPicker() {
-        self.present(colorPickerViewController, animated: true, completion: nil)
+        present(colorPickerViewController, animated: true, completion: nil)
     }
 }
 
@@ -229,26 +229,17 @@ extension ViewController: ARSessionDelegate {
                 }
             } else {
                 createSphereAndInsert(atPosition: currentPointPosition, andAddToStrokeAnchor: currentStrokeAnchor!)
-                self.previousPoint = currentPointPosition
+                previousPoint = currentPointPosition
             }
         }
     }
 }
 
-extension SCNGeometry {
-    class func line(from vector1: SCNVector3, to vector2: SCNVector3) -> SCNGeometry {
-        let indices: [Int32] = [0, 1]
-        let source = SCNGeometrySource(vertices: [vector1, vector2])
-        let element = SCNGeometryElement(indices: indices, primitiveType: .line)
-        return SCNGeometry(sources: [source], elements: [element])
-    }
-}
-
 extension ViewController: UIColorPickerViewControllerDelegate {
     func colorPickerViewController(_ viewController: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool) {
-        self.currentColor = color
-        self.colorPickerButton.backgroundColor = color
-        self.colorPickerViewController.dismiss(animated: true, completion: nil)
+        currentColor = color
+        colorPickerButton.backgroundColor = color
+        colorPickerViewController.dismiss(animated: true, completion: nil)
     }
 }
 
