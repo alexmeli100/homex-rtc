@@ -13,6 +13,11 @@ class ViewController: UIViewController {
 
     @IBOutlet var sceneView: ARSCNView!
     var colorPickerButton: UIButton!
+    var clearButtonBackground: UIVisualEffectView!
+    var undoButtonBackground: UIVisualEffectView!
+    var clearButton: UIButton!
+    var undoButton: UIButton!
+    var buttonStackView: UIStackView!
     var colorPickerViewController: UIColorPickerViewController!
     var currentColor = UIColor.systemGreen
 
@@ -85,6 +90,30 @@ class ViewController: UIViewController {
         colorPickerViewController = UIColorPickerViewController()
         colorPickerViewController.delegate = self
         
+        undoButtonBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        undoButtonBackground.translatesAutoresizingMaskIntoConstraints = false
+        undoButtonBackground.clipsToBounds = true
+        undoButtonBackground.layer.cornerRadius = 20
+        
+        clearButtonBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        clearButtonBackground.translatesAutoresizingMaskIntoConstraints = false
+        clearButtonBackground.layer.cornerRadius = 20
+        clearButtonBackground.clipsToBounds = true
+        
+        undoButton = UIButton()
+        undoButton.setImage(UIImage(systemName: "arrow.uturn.left", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular, scale: .default)), for: .normal)
+        undoButton.tintColor = .white
+        undoButton.translatesAutoresizingMaskIntoConstraints = false
+        undoButton.addTarget(self, action: #selector(undoButtonPressed), for: .touchUpInside)
+        undoButtonBackground.contentView.addSubview(undoButton)
+        
+        clearButton = UIButton()
+        clearButton.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular, scale: .default)), for: .normal)
+        clearButton.tintColor = .white
+        clearButton.translatesAutoresizingMaskIntoConstraints = false
+        clearButton.addTarget(self, action: #selector(clearButtonPressed), for: .touchUpInside)
+        clearButtonBackground.contentView.addSubview(clearButton)
+        
         colorPickerButton = UIButton()
         colorPickerButton.setImage(UIImage(systemName: "paintbrush.pointed", withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .regular, scale: .default)), for: .normal)
         colorPickerButton.backgroundColor = currentColor
@@ -94,11 +123,37 @@ class ViewController: UIViewController {
         colorPickerButton.addTarget(self, action: #selector(presentColorPicker), for: .touchUpInside)
         view.addSubview(colorPickerButton)
         
+        buttonStackView = UIStackView(arrangedSubviews: [undoButtonBackground, clearButtonBackground])
+        buttonStackView.axis = .vertical
+        buttonStackView.spacing = 10
+        buttonStackView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(buttonStackView)
+        
+        
         NSLayoutConstraint.activate([
             colorPickerButton.heightAnchor.constraint(equalToConstant: 70),
             colorPickerButton.widthAnchor.constraint(equalToConstant: 70),
             colorPickerButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -15),
-            colorPickerButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -35)
+            colorPickerButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -35),
+            
+            clearButtonBackground.heightAnchor.constraint(equalToConstant: 40),
+            clearButtonBackground.widthAnchor.constraint(equalToConstant: 40),
+            
+            clearButton.heightAnchor.constraint(equalToConstant: 25),
+            clearButton.widthAnchor.constraint(equalToConstant: 25),
+            clearButton.centerXAnchor.constraint(equalTo: clearButtonBackground.centerXAnchor),
+            clearButton.centerYAnchor.constraint(equalTo: clearButtonBackground.centerYAnchor),
+            
+            undoButtonBackground.heightAnchor.constraint(equalToConstant: 40),
+            undoButtonBackground.widthAnchor.constraint(equalToConstant: 40),
+            
+            undoButton.heightAnchor.constraint(equalToConstant: 25),
+            undoButton.widthAnchor.constraint(equalToConstant: 25),
+            undoButton.centerXAnchor.constraint(equalTo: undoButtonBackground.centerXAnchor),
+            undoButton.centerYAnchor.constraint(equalTo: undoButtonBackground.centerYAnchor),
+            
+            buttonStackView.centerXAnchor.constraint(equalTo: colorPickerButton.centerXAnchor),
+            buttonStackView.bottomAnchor.constraint(equalTo: colorPickerButton.topAnchor, constant: -15)
         ])
     }
     
@@ -185,6 +240,24 @@ class ViewController: UIViewController {
     
     @objc private func presentColorPicker() {
         present(colorPickerViewController, animated: true, completion: nil)
+    }
+    
+    @objc private func undoButtonPressed() {
+        playHapticFeeback()
+        
+        // Add code for undo here
+    }
+    
+    @objc private func clearButtonPressed() {
+        playHapticFeeback()
+        
+        // Add code for clear here
+    }
+    
+    private func playHapticFeeback() {
+        let selectorFeedbackGenerator = UISelectionFeedbackGenerator()
+        selectorFeedbackGenerator.prepare()
+        selectorFeedbackGenerator.selectionChanged()
     }
 }
 
