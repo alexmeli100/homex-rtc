@@ -9,14 +9,60 @@ import UIKit
 import SceneKit
 import ARKit
 
-class ViewController: UIViewController, ARSCNViewDelegate {
+class ViewController: UIViewController {
 
     @IBOutlet var sceneView: ARSCNView!
     var colorPickerButton: UIButton!
     var colorPickerViewController: UIColorPickerViewController!
-    var swiped = false
-    var lastPosition: SCNVector3?
     var currentColor = UIColor.systemGreen
+
+    var previousPoint: SCNVector3?
+    var currentFingerPosition: CGPoint?
+    var screenShotOverlayImageView: UIImageView?
+    var strokeAnchorIDs: [UUID] = []
+    var currentStrokeAnchorNode: SCNNode?
+    let sphereNodesManager = SphereNodesManager()
+
+    private func createSphereAndInsert(atPositions positions: [SCNVector3], andAddToStrokeAnchor strokeAnchor: StrokeAnchor) {
+        for position in positions {
+            createSphereAndInsert(atPosition: position, andAddToStrokeAnchor: strokeAnchor)
+        }
+    }
+
+    private func createSphereAndInsert(atPosition position: SCNVector3, andAddToStrokeAnchor strokeAnchor: StrokeAnchor) {
+        guard let currentStrokeNode = currentStrokeAnchorNode else {
+            return
+        }
+        // Get the reference sphere node and clone it
+        let referenceSphereNode = sphereNodesManager.getReferenceSphereNode(forStrokeColor: strokeAnchor.color)
+        let newSphereNode = referenceSphereNode.clone()
+        // Convert the position from world transform to local transform (relative to the anchors default node)
+        let localPosition = currentStrokeNode.convertPosition(position, from: nil)
+        newSphereNode.position = localPosition
+        // Add the node to the default node of the anchor
+        currentStrokeNode.addChildNode(newSphereNode)
+        // Add the position of the node to the stroke anchors sphereLocations array (Used for saving/loading the world map)
+        strokeAnchor.sphereLocations.append([newSphereNode.position.x, newSphereNode.position.y, newSphereNode.position.z])
+    }
+
+    private func anchorForID(_ anchorID: UUID) -> StrokeAnchor? {
+        return sceneView.session.currentFrame?.anchors.first(where: { $0.identifier == anchorID }) as? StrokeAnchor
+    }
+
+    private func sortStrokeAnchorIDsInOrderOfDateCreated() {
+        var strokeAnchorsArray: [StrokeAnchor] = []
+        for anchorID in strokeAnchorIDs {
+            if let strokeAnchor = anchorForID(anchorID) {
+                strokeAnchorsArray.append(strokeAnchor)
+            }
+        }
+        strokeAnchorsArray.sort(by: { $0.dateCreated < $1.dateCreated })
+
+        strokeAnchorIDs = []
+        for anchor in strokeAnchorsArray {
+            strokeAnchorIDs.append(anchor.identifier)
+        }
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -32,6 +78,8 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         
         // Set the scene to the view
         sceneView.scene = scene
+        sceneView.session.delegate = self
+
         UIApplication.shared.isIdleTimerDisabled = true
         
         colorPickerViewController = UIColorPickerViewController()
@@ -49,8 +97,8 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         NSLayoutConstraint.activate([
             colorPickerButton.heightAnchor.constraint(equalToConstant: 70),
             colorPickerButton.widthAnchor.constraint(equalToConstant: 70),
-            colorPickerButton.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -15),
-            colorPickerButton.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: -35)
+            colorPickerButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -15),
+            colorPickerButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -35)
         ])
     }
     
@@ -93,60 +141,97 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         return node
     }
 */
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let currentTouchPoint = touches.first?.location(in: self.sceneView),
-              let featurePointHitTest = self.sceneView.hitTest(currentTouchPoint, types: .featurePoint).first else { return }
+//    override func renderer(_ renderer: SCNSceneRenderer, didRemove node: SCNNode, for anchor: ARAnchor) {
+//        // Remove the anchorID from the strokes array
+//        print("Anchor removed")
+//        strokeAnchorIDs.removeAll(where: { $0 == anchor.identifier })
+//    }
 
-        //3. Get The World Coordinates
-        let worldCoordinates = featurePointHitTest.worldTransform
-        lastPosition = SCNVector3(worldCoordinates.columns.3.x, worldCoordinates.columns.3.y, worldCoordinates.columns.3.z)
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Create a StrokeAnchor and add it to the Scene (One Anchor will be added to the exaction position of the first sphere for every new stroke)
+        guard let touch = touches.first else { return }
+        guard let touchPositionInFrontOfCamera = getPosition(ofPoint: touch.location(in: sceneView), atDistanceFromCamera: 0.2, inView: sceneView) else { return }
+        // Convert the position from SCNVector3 to float4x4
+        let strokeAnchor = StrokeAnchor(name: "strokeAnchor", transform: float4x4(float4(1, 0, 0, 0),
+                float4(0, 1, 0, 0),
+                float4(0, 0, 1, 0),
+                float4(touchPositionInFrontOfCamera.x,
+                        touchPositionInFrontOfCamera.y,
+                        touchPositionInFrontOfCamera.z,
+                        1)))
+        strokeAnchor.color = currentColor
+        sceneView.session.add(anchor: strokeAnchor)
+        currentFingerPosition = touch.location(in: sceneView)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let currentTouchPoint = touches.first?.location(in: sceneView),
-              let featurePointHitTest = sceneView.hitTest(currentTouchPoint, types: .featurePoint).first else { return }
-
-        //3. Get The World Coordinates
-        let worldCoordinates = featurePointHitTest.worldTransform
-
-        //4. Create An SCNNode With An SCNSphere Geeomtery
-        let sphereNode = SCNNode()
-        let sphereNodeGeometry = SCNSphere(radius: 0.003)
-//
-//        //5. Generate A Random Colour For The Node's Geometry
-        sphereNodeGeometry.firstMaterial?.diffuse.contents = currentColor
-        sphereNode.geometry = sphereNodeGeometry
-        sphereNode.position = SCNVector3(worldCoordinates.columns.3.x,  worldCoordinates.columns.3.y,  worldCoordinates.columns.3.z)
-
-
-        //6. Position & Add It To The Scene Hierachy
-        guard let lastPos = lastPosition else { return }
-        //let currPosition = SCNVector3(worldCoordinates.columns.3.x,  worldCoordinates.columns.3.y,  worldCoordinates.columns.3.z)
-        sceneView.scene.rootNode.addChildNode(sphereNode)
+        guard let touch = touches.first else { return }
+        currentFingerPosition = touch.location(in: sceneView)
+        //print(currentFingerPosition.debugDescription)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        lastPosition = nil
-
+        previousPoint = nil
+        currentStrokeAnchorNode = nil
+        currentFingerPosition = nil
     }
 
-    func session(_ session: ARSession, didFailWithError error: Error) {
-        // Present an error message to the user
-        
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        previousPoint = nil
+        currentStrokeAnchorNode = nil
+        currentFingerPosition = nil
     }
-    
-    func sessionWasInterrupted(_ session: ARSession) {
-        // Inform the user that the session has been interrupted, for example, by presenting an overlay
-        
-    }
-    
-    func sessionInterruptionEnded(_ session: ARSession) {
-        // Reset tracking and/or remove existing anchors if consistent tracking is required
-        
-    }
+
     
     @objc private func presentColorPicker() {
         self.present(colorPickerViewController, animated: true, completion: nil)
+    }
+}
+
+extension ViewController: ARSCNViewDelegate {
+
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        // This is only used when loading a worldMap
+        if let strokeAnchor = anchor as? StrokeAnchor {
+            currentStrokeAnchorNode = node
+            strokeAnchorIDs.append(strokeAnchor.identifier)
+            for sphereLocation in strokeAnchor.sphereLocations {
+                createSphereAndInsert(atPosition: SCNVector3Make(sphereLocation[0], sphereLocation[1], sphereLocation[2]), andAddToStrokeAnchor: strokeAnchor)
+            }
+        }
+    }
+
+    func renderer(_ renderer: SCNSceneRenderer, didRemove node: SCNNode, for anchor: ARAnchor) {
+        // Remove the anchorID from the strokes array
+        print("Anchor removed")
+        strokeAnchorIDs.removeAll(where: { $0 == anchor.identifier })
+    }
+}
+
+extension ViewController: ARSessionDelegate {
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        // Draw the spheres
+        guard let currentStrokeAnchorID = strokeAnchorIDs.last else { return }
+        let currentStrokeAnchor = anchorForID(currentStrokeAnchorID)
+        if currentFingerPosition != nil && currentStrokeAnchor != nil {
+            guard let currentPointPosition = getPosition(ofPoint: currentFingerPosition!, atDistanceFromCamera: 0.2, inView: sceneView) else { return }
+
+            if let previousPoint = previousPoint {
+                // Do not create any new spheres if the distance hasn't changed much
+                let distance = abs(previousPoint.distance(vector: currentPointPosition))
+                if distance > 0.00104 {
+                    createSphereAndInsert(atPosition: currentPointPosition, andAddToStrokeAnchor: currentStrokeAnchor!)
+                    // Draw spheres between the currentPoint and previous point if they are further than the specified distance (Otherwise fast movement will make the line blocky)
+                    // TODO: The spacing should depend on the brush size
+                    let positions = getPositionsOnLineBetween(point1: previousPoint, andPoint2: currentPointPosition, withSpacing: 0.001)
+                    createSphereAndInsert(atPositions: positions, andAddToStrokeAnchor: currentStrokeAnchor!)
+                    self.previousPoint = currentPointPosition
+                }
+            } else {
+                createSphereAndInsert(atPosition: currentPointPosition, andAddToStrokeAnchor: currentStrokeAnchor!)
+                self.previousPoint = currentPointPosition
+            }
+        }
     }
 }
 
@@ -164,5 +249,293 @@ extension ViewController: UIColorPickerViewControllerDelegate {
         self.currentColor = color
         self.colorPickerButton.backgroundColor = color
         self.colorPickerViewController.dismiss(animated: true, completion: nil)
+    }
+}
+
+func getCameraPosition(in view: ARSCNView) -> SCNVector3? {
+    guard let lastFrame = view.session.currentFrame else {
+        return nil
+    }
+    let position = lastFrame.camera.transform * float4(x: 0, y: 0, z: 0, w: 1)
+    let camera: SCNVector3 = SCNVector3(position.x, position.y, position.z)
+
+    return camera
+}
+
+// Gets the real world position of the touch point at x distance away from the camera
+func getPosition(ofPoint point: CGPoint,
+                 atDistanceFromCamera distance: Float,
+                 inView view: ARSCNView) -> SCNVector3? {
+    guard let cameraPosition = getCameraPosition(in: view) else {
+        return nil
+    }
+    let directionOfPoint = getDirection(for: point, in: view).normalized()
+    return (directionOfPoint * distance) + cameraPosition
+}
+
+// Takes the coordinates of the 2D point and converts it to a vector in the real world
+func getDirection(for point: CGPoint, in view: SCNView) -> SCNVector3 {
+    let farPoint  = view.unprojectPoint(SCNVector3Make(Float(point.x), Float(point.y), 1))
+    let nearPoint = view.unprojectPoint(SCNVector3Make(Float(point.x), Float(point.y), 0))
+
+    return SCNVector3Make(farPoint.x - nearPoint.x, farPoint.y - nearPoint.y, farPoint.z - nearPoint.z)
+}
+
+// Gets the positions of the points on the line between point1 and point2 with the given spacing
+func getPositionsOnLineBetween(point1: SCNVector3,
+                               andPoint2 point2: SCNVector3,
+                               withSpacing spacing: Float) -> [SCNVector3] {
+    var positions: [SCNVector3] = []
+    // Calculate the distance between previous point and current point
+    let distance = point1.distance(vector: point2)
+    let numberOfCirclesToCreate = Int(distance / spacing)
+
+    // https://math.stackexchange.com/a/83419
+    // Begin by creating a vector BA by subtracting A from B (A = previousPoint, B = currentPoint)
+    let vectorBA = point2 - point1
+    // Normalize vector BA by dividng it by it's length
+    let vectorBANormalized = vectorBA.normalized()
+    // This new vector can now be scaled and added to A to find the point at the specified distance
+    for i in 0...((numberOfCirclesToCreate > 1) ? (numberOfCirclesToCreate - 1) : numberOfCirclesToCreate) {
+        let position = point1 + (vectorBANormalized * (Float(i) * spacing))
+        positions.append(position)
+    }
+    return positions
+}
+
+extension SCNVector3
+{
+    /**
+     * Negates the vector described by SCNVector3 and returns
+     * the result as a new SCNVector3.
+     */
+    func negate() -> SCNVector3 {
+        return self * -1
+    }
+
+    /**
+     * Negates the vector described by SCNVector3
+     */
+    mutating func negated() -> SCNVector3 {
+        self = negate()
+        return self
+    }
+
+    /**
+     * Returns the length (magnitude) of the vector described by the SCNVector3
+     */
+    func length() -> Float {
+        return sqrtf(x*x + y*y + z*z)
+    }
+
+    /**
+     * Normalizes the vector described by the SCNVector3 to length 1.0 and returns
+     * the result as a new SCNVector3.
+     */
+    func normalized() -> SCNVector3 {
+        return self / length()
+    }
+
+    /**
+     * Normalizes the vector described by the SCNVector3 to length 1.0.
+     */
+    mutating func normalize() -> SCNVector3 {
+        self = normalized()
+        return self
+    }
+
+    /**
+     * Calculates the distance between two SCNVector3. Pythagoras!
+     */
+    func distance(vector: SCNVector3) -> Float {
+        return (self - vector).length()
+    }
+
+    /**
+     * Calculates the dot product between two SCNVector3.
+     */
+    func dot(vector: SCNVector3) -> Float {
+        return x * vector.x + y * vector.y + z * vector.z
+    }
+
+    /**
+     * Calculates the cross product between two SCNVector3.
+     */
+    func cross(vector: SCNVector3) -> SCNVector3 {
+        return SCNVector3Make(y * vector.z - z * vector.y, z * vector.x - x * vector.z, x * vector.y - y * vector.x)
+    }
+
+    // MARK: These two methods were added from SCNVector3+MathUtils.swift
+
+    /// Calculate the magnitude of this vector
+    var magnitude:SCNFloat {
+        get {
+            return sqrt(dot(vector: self))
+        }
+    }
+
+    /**
+     Calculate the angle between two vectors
+
+     - parameter vectorB: Other vector in the calculation
+     */
+    func angleBetweenVectors(_ vectorB:SCNVector3) -> SCNFloat {
+
+        //cos(angle) = (A.B)/(|A||B|)
+        let cosineAngle = (dot(vector: vectorB) / (magnitude * vectorB.magnitude))
+        return SCNFloat(acos(cosineAngle))
+    }
+}
+
+/**
+ * Adds two SCNVector3 vectors and returns the result as a new SCNVector3.
+ */
+func + (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+    return SCNVector3Make(left.x + right.x, left.y + right.y, left.z + right.z)
+}
+
+/**
+ * Increments a SCNVector3 with the value of another.
+ */
+func += ( left: inout SCNVector3, right: SCNVector3) {
+    left = left + right
+}
+
+/**
+ * Subtracts two SCNVector3 vectors and returns the result as a new SCNVector3.
+ */
+func - (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+    return SCNVector3Make(left.x - right.x, left.y - right.y, left.z - right.z)
+}
+
+/**
+ * Decrements a SCNVector3 with the value of another.
+ */
+func -= ( left: inout SCNVector3, right: SCNVector3) {
+    left = left - right
+}
+
+/**
+ * Multiplies two SCNVector3 vectors and returns the result as a new SCNVector3.
+ */
+func * (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+    return SCNVector3Make(left.x * right.x, left.y * right.y, left.z * right.z)
+}
+
+/**
+ * Multiplies a SCNVector3 with another.
+ */
+func *= ( left: inout SCNVector3, right: SCNVector3) {
+    left = left * right
+}
+
+/**
+ * Multiplies the x, y and z fields of a SCNVector3 with the same scalar value and
+ * returns the result as a new SCNVector3.
+ */
+func * (vector: SCNVector3, scalar: Float) -> SCNVector3 {
+    return SCNVector3Make(vector.x * scalar, vector.y * scalar, vector.z * scalar)
+}
+
+/**
+ * Multiplies the x and y fields of a SCNVector3 with the same scalar value.
+ */
+func *= ( vector: inout SCNVector3, scalar: Float) {
+    vector = vector * scalar
+}
+
+/**
+ * Divides two SCNVector3 vectors abd returns the result as a new SCNVector3
+ */
+func / (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+    return SCNVector3Make(left.x / right.x, left.y / right.y, left.z / right.z)
+}
+
+/**
+ * Divides a SCNVector3 by another.
+ */
+func /= ( left: inout SCNVector3, right: SCNVector3) {
+    left = left / right
+}
+
+/**
+ * Divides the x, y and z fields of a SCNVector3 by the same scalar value and
+ * returns the result as a new SCNVector3.
+ */
+func / (vector: SCNVector3, scalar: Float) -> SCNVector3 {
+    return SCNVector3Make(vector.x / scalar, vector.y / scalar, vector.z / scalar)
+}
+
+/**
+ * Divides the x, y and z of a SCNVector3 by the same scalar value.
+ */
+func /= ( vector: inout SCNVector3, scalar: Float) {
+    vector = vector / scalar
+}
+
+/**
+ * Negate a vector
+ */
+func SCNVector3Negate(vector: SCNVector3) -> SCNVector3 {
+    return vector * -1
+}
+
+/**
+ * Returns the length (magnitude) of the vector described by the SCNVector3
+ */
+func SCNVector3Length(vector: SCNVector3) -> Float
+{
+    return sqrtf(vector.x*vector.x + vector.y*vector.y + vector.z*vector.z)
+}
+
+/**
+ * Returns the distance between two SCNVector3 vectors
+ */
+func SCNVector3Distance(vectorStart: SCNVector3, vectorEnd: SCNVector3) -> Float {
+    return SCNVector3Length(vector: vectorEnd - vectorStart)
+}
+
+/**
+ * Returns the distance between two SCNVector3 vectors
+ */
+func SCNVector3Normalize(vector: SCNVector3) -> SCNVector3 {
+    return vector / SCNVector3Length(vector: vector)
+}
+
+/**
+ * Calculates the dot product between two SCNVector3 vectors
+ */
+func SCNVector3DotProduct(left: SCNVector3, right: SCNVector3) -> Float {
+    return left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+/**
+ * Calculates the cross product between two SCNVector3 vectors
+ */
+func SCNVector3CrossProduct(left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+    return SCNVector3Make(left.y * right.z - left.z * right.y, left.z * right.x - left.x * right.z, left.x * right.y - left.y * right.x)
+}
+
+/**
+ * Calculates the SCNVector from lerping between two SCNVector3 vectors
+ */
+func SCNVector3Lerp(vectorStart: SCNVector3, vectorEnd: SCNVector3, t: Float) -> SCNVector3 {
+    return SCNVector3Make(vectorStart.x + ((vectorEnd.x - vectorStart.x) * t), vectorStart.y + ((vectorEnd.y - vectorStart.y) * t), vectorStart.z + ((vectorEnd.z - vectorStart.z) * t))
+}
+
+/**
+ * Project the vector, vectorToProject, onto the vector, projectionVector.
+ */
+func SCNVector3Project(vectorToProject: SCNVector3, projectionVector: SCNVector3) -> SCNVector3 {
+    let scale: Float = SCNVector3DotProduct(left: projectionVector, right: vectorToProject) / SCNVector3DotProduct(left: projectionVector, right: projectionVector)
+    let v: SCNVector3 = projectionVector * scale
+    return v
+}
+
+extension float4x4 {
+    func convertToSCNVector3() -> SCNVector3 {
+        return SCNVector3Make(self.columns.3.x,
+                self.columns.3.y,
+                self.columns.3.z)
     }
 }
